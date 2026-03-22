@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>房間</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container room-screen">
+    <header class="room-header">
+      <div class="room-info">
+        <h2>房間 <span id="room-id-display"></span></h2>
+        <button id="btn-copy" class="btn btn-small" title="複製連結">📋 複製連結</button>
+      </div>
+      <a href="/" class="btn btn-small btn-back">← 返回</a>
+    </header>
+
+    <div class="color-picker">
+      <span class="label">選擇顏色：</span>
+      <button class="color-btn" data-color="red" style="--c: #e74c3c">101</button>
+      <button class="color-btn" data-color="blue" style="--c: #3498db">102</button>
+      <button class="color-btn" data-color="green" style="--c: #2ecc71">103</button>
+      <button class="color-btn" data-color="yellow" style="--c: #f1c40f">104</button>
+    </div>
+
+    <div class="my-sequence" id="my-sequence"></div>
+
+    <div class="player-list" id="player-list"></div>
+
+    <div class="board-wrapper">
+      <table class="board" id="board">
+        <tbody id="board-body"></tbody>
+      </table>
+    </div>
+
+    <button id="btn-clear" class="btn btn-clear" disabled>清除我的顏色</button>
+
+    <div id="connection-status" class="connection-status" hidden>連線中斷，嘗試重新連線...</div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

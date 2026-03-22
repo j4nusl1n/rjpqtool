@@ -1,0 +1,14 @@
+{
+  "name": "rjpqtool",
+  "version": "1.0.0",
+  "description": "多人互動方塊房間工具 - Real-time multiplayer grid room tool",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "sql.js": "^1.6.2",
+    "ws": "^8.18.0"
+  }
+}

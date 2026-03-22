@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>多人互動方塊房間</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container entry-screen">
+    <h1>多人互動方塊房間</h1>
+    <div class="entry-actions">
+      <button id="btn-create" class="btn btn-primary">建立房間</button>
+      <div class="divider">或</div>
+      <div class="join-group">
+        <input type="text" id="input-room-id" placeholder="輸入房間碼" maxlength="6" pattern="[0-9]*" inputmode="numeric">
+        <button id="btn-join" class="btn btn-secondary">加入房間</button>
+      </div>
+    </div>
+    <p id="entry-error" class="error" hidden></p>
+  </div>
+
+  <script>
+    const btnCreate = document.getElementById('btn-create');
+    const btnJoin = document.getElementById('btn-join');
+    const inputRoomId = document.getElementById('input-room-id');
+    const entryError = document.getElementById('entry-error');
+
+    function showError(msg) {
+      entryError.textContent = msg;
+      entryError.hidden = false;
+    }
+
+    btnCreate.addEventListener('click', async () => {
+      btnCreate.disabled = true;
+      try {
+        const res = await fetch('/api/rooms', { method: 'POST' });
+        const data = await res.json();
+        window.location.href = '/room.html?id=' + data.room_id;
+      } catch {
+        showError('無法建立房間，請稍後再試');
+        btnCreate.disabled = false;
+      }
+    });
+
+    btnJoin.addEventListener('click', () => tryJoin());
+    inputRoomId.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') tryJoin();
+    });
+
+    async function tryJoin() {
+      const roomId = inputRoomId.value.trim();
+      if (!/^\d{6}$/.test(roomId)) {
+        return showError('請輸入 6 位數字房間碼');
+      }
+      btnJoin.disabled = true;
+      try {
+        const res = await fetch('/api/rooms/' + roomId);
+        if (res.status === 404) {
+          showError('房間不存在');
+          btnJoin.disabled = false;
+          return;
+        }
+        const data = await res.json();
+        if (data.full) {
+          showError('房間已滿');
+          btnJoin.disabled = false;
+          return;
+        }
+        window.location.href = '/room.html?id=' + roomId;
+      } catch {
+        showError('無法連線，請稍後再試');
+        btnJoin.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>
