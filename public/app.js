@@ -18,6 +18,11 @@ const connStatus = document.getElementById('connection-status');
 const colorBtns = document.querySelectorAll('.color-btn');
 const mySequenceEl = document.getElementById('my-sequence');
 const btnResetBoard = document.getElementById('btn-reset-board');
+const btnPip = document.getElementById('btn-pip');
+const pipCanvas = document.getElementById('pip-canvas');
+const pipVideo = document.getElementById('pip-video');
+let pipActive = false;
+let pipStream = null;
 
 // Track board cell ownership: boardCells[row] = { color, player_id } per col
 // key: "row,col" -> { color, player_id }
@@ -239,6 +244,7 @@ function handleRoomState(msg) {
     }
   }
   renderMySequence();
+  if (pipActive) drawBoardToCanvas();
 }
 
 function handleColorUpdate(msg) {
@@ -267,6 +273,7 @@ function handleCellUpdate(msg) {
     delete boardCells[msg.row + ',' + msg.col];
   }
   renderMySequence();
+  if (pipActive) drawBoardToCanvas();
 }
 
 function handleBoardClear(msg) {
@@ -275,12 +282,14 @@ function handleBoardClear(msg) {
     delete boardCells[row + ',' + col];
   }
   renderMySequence();
+  if (pipActive) drawBoardToCanvas();
 }
 
 function handleBoardReset() {
   boardCells = {};
   clearBoardColors();
   renderMySequence();
+  if (pipActive) drawBoardToCanvas();
 }
 
 function handlePlayerJoined(msg) {
@@ -386,3 +395,101 @@ function getColorHex(color) {
   const map = { red: '#e74c3c', blue: '#3498db', green: '#2ecc71', yellow: '#f1c40f' };
   return map[color] || '#555';
 }
+
+// --- Picture-in-Picture ---
+
+function initPip() {
+  if (!document.pictureInPictureEnabled) return;
+  btnPip.style.display = '';
+
+  btnPip.addEventListener('click', function() {
+    if (pipActive) {
+      if (document.pictureInPictureElement) {
+        document.exitPictureInPicture();
+      }
+      return;
+    }
+    drawBoardToCanvas();
+    pipStream = pipCanvas.captureStream(0); // 0 fps = manual frame push
+    pipVideo.srcObject = pipStream;
+    pipVideo.play().then(function() {
+      return pipVideo.requestPictureInPicture();
+    }).then(function() {
+      pipActive = true;
+      btnPip.textContent = '關閉子母畫面';
+    }).catch(function(err) {
+      console.warn('PiP failed:', err);
+    });
+  });
+
+  pipVideo.addEventListener('leavepictureinpicture', function() {
+    pipActive = false;
+    pipStream = null;
+    btnPip.textContent = '子母畫面模式';
+    pipVideo.srcObject = null;
+  });
+}
+
+function drawBoardToCanvas() {
+  var ctx = pipCanvas.getContext('2d');
+  var W = pipCanvas.width;   // 320
+  var H = pipCanvas.height;  // 480
+
+  var cols = 5;   // 1 label + 4 data
+  var rows = 11;  // 1 header + 10 data
+  var cellW = Math.floor(W / cols);
+  var cellH = Math.floor(H / rows);
+  var gap = 2;
+
+  // Background
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.font = 'bold ' + Math.floor(cellH * 0.45) + 'px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // Header row: empty + col numbers 1-4
+  for (var c = 0; c < cols; c++) {
+    var x = c * cellW;
+    ctx.fillStyle = '#16213e';
+    ctx.fillRect(x + gap, gap, cellW - gap * 2, cellH - gap * 2);
+    if (c > 0) {
+      ctx.fillStyle = '#888';
+      ctx.fillText(String(c), x + cellW / 2, cellH / 2);
+    }
+  }
+
+  // Data rows (row 10 at top, row 1 at bottom)
+  for (var r = 0; r < 10; r++) {
+    var rowNum = 10 - r;
+    var y = (r + 1) * cellH;
+
+    // Label column
+    ctx.fillStyle = '#16213e';
+    ctx.fillRect(gap, y + gap, cellW - gap * 2, cellH - gap * 2);
+    ctx.fillStyle = '#888';
+    ctx.fillText(String(rowNum), cellW / 2, y + cellH / 2);
+
+    // Data columns
+    for (var dc = 0; dc < 4; dc++) {
+      var col = dc + 2; // col 2-5 in data model
+      var cx = (dc + 1) * cellW;
+      var cell = boardCells[rowNum + ',' + col];
+      ctx.fillStyle = (cell && cell.color) ? getColorHex(cell.color) : '#16213e';
+      ctx.fillRect(cx + gap, y + gap, cellW - gap * 2, cellH - gap * 2);
+    }
+  }
+
+  // Request a new frame on the stream
+  if (pipActive && pipStream) {
+    try {
+      var tracks = pipStream.getVideoTracks();
+      if (tracks[0] && tracks[0].requestFrame) {
+        tracks[0].requestFrame();
+      }
+    } catch (e) {}
+  }
+}
+
+initPip();

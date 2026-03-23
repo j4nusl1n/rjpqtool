@@ -35,7 +35,11 @@
     </div>
 
     <button id="btn-clear" class="btn btn-clear" disabled>清除我的顏色</button>
+    <button id="btn-pip" class="btn btn-small" style="margin-top:10px;width:100%;display:none">子母畫面模式</button>
     <button id="btn-reset-board" class="btn btn-clear" style="margin-top:10px;background:#c0392b;color:#fff;display:none">重置整個棋盤</button>
+
+    <canvas id="pip-canvas" width="320" height="480" style="display:none"></canvas>
+    <video id="pip-video" muted playsinline style="display:none"></video>
 
     <div id="connection-status" class="connection-status" hidden>連線中斷，嘗試重新連線...</div>
   </div>
