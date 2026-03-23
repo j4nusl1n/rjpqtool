@@ -10,6 +10,7 @@ A real-time multiplayer grid room tool. Up to 4 players join a shared room, pick
 - **One color per row** — Each color can only appear once per row; the 4th cell auto-fills when 3 are placed
 - **Sequence display** — Shows your selected columns as a string (e.g., `142?4 ?3???`)
 - **Clear button** — Remove all your color's cells at once
+- **Picture-in-Picture** — Float the board in a PiP overlay while switching tabs (Chrome/Edge/Safari 13.1+)
 - **Reconnection** — 30-second grace period preserves your color and state on disconnect
 - **Persistence** — SQLite database survives server restarts
 - **Mobile-friendly** — Responsive design with touch-friendly cell sizes
@@ -21,11 +22,16 @@ npm install
 npm start
 ```
 
-Server runs on `http://localhost:3001` by default. Override with `PORT` env:
+Server runs on `http://localhost:3001` by default. Override with environment variables:
 
 ```bash
-PORT=8080 npm start
+PORT=8080 DOMAIN=example.com npm start
 ```
+
+| Variable | Default     | Description                                      |
+|----------|-------------|--------------------------------------------------|
+| `PORT`   | `3001`      | Port to listen on                                |
+| `DOMAIN` | `localhost` | Hostname used in the admin URL printed at startup |
 
 ## How to Use
 
