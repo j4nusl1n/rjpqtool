@@ -180,6 +180,12 @@ function selectColor(roomId, playerId, color) {
   }
 }
 
+function deselectColor(roomId, playerId) {
+  run('UPDATE players SET color = NULL WHERE room_id = ? AND player_id = ?', [roomId, playerId]);
+  run("UPDATE rooms SET last_activity = datetime('now') WHERE room_id = ?", [roomId]);
+  markDirty();
+}
+
 function clickCell(roomId, row, col, playerId, color) {
   db.run('BEGIN');
   try {
@@ -265,6 +271,19 @@ function clearMyCells(roomId, playerId, color) {
   }
 }
 
+function resetBoard(roomId) {
+  db.run('BEGIN');
+  try {
+    run('UPDATE board_state SET color = NULL, player_id = NULL WHERE room_id = ?', [roomId]);
+    run("UPDATE rooms SET last_activity = datetime('now') WHERE room_id = ?", [roomId]);
+    db.run('COMMIT');
+    markDirty();
+  } catch (e) {
+    db.run('ROLLBACK');
+    throw e;
+  }
+}
+
 function cleanupStaleRooms(minutes) {
   db.run('BEGIN');
   try {
@@ -317,8 +336,10 @@ module.exports = {
   joinRoom,
   rejoinRoom,
   selectColor,
+  deselectColor,
   clickCell,
   clearMyCells,
+  resetBoard,
   cleanupStaleRooms,
   getRoomState,
   roomExists,

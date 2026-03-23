@@ -13,9 +13,23 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 const PORT = process.env.PORT || 3001;
+const DOMAIN = process.env.DOMAIN || 'localhost';
 const GRACE_PERIOD_MS = 30_000;
 const CLEANUP_INTERVAL_MS = 5 * 60_000;
 const STALE_ROOM_MINUTES = 30;
+const ADMIN_TOKEN = crypto.randomBytes(24).toString('hex');
+
+function verifyAdminToken(token) {
+  if (!token || typeof token !== 'string') return false;
+  try {
+    const a = Buffer.from(token);
+    const b = Buffer.from(ADMIN_TOKEN);
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
 
 // --- In-memory state ---
 
@@ -112,12 +126,15 @@ function handleJoinRoom(ws, data) {
 
       addToRoom(room_id, ws);
 
+      ws.isAdmin = verifyAdminToken(data.admin_token);
+
       const state = db.getRoomState(room_id);
       return sendTo(ws, {
         type: 'room_state',
         ...state,
         player_id: player.player_id,
         session_token,
+        is_admin: ws.isAdmin,
       });
     }
   }
@@ -134,6 +151,7 @@ function handleJoinRoom(ws, data) {
   ws.playerId = playerId;
   ws.roomId = room_id;
   ws.sessionToken = newSessionToken;
+  ws.isAdmin = verifyAdminToken(data.admin_token);
 
   addToRoom(room_id, ws);
 
@@ -143,6 +161,7 @@ function handleJoinRoom(ws, data) {
     ...state,
     player_id: playerId,
     session_token: newSessionToken,
+    is_admin: ws.isAdmin,
   });
 
   broadcast(room_id, { type: 'player_joined', player_id: playerId }, ws);
@@ -160,6 +179,16 @@ function handleSelectColor(ws, data) {
   }
 
   broadcastAll(ws.roomId, { type: 'color_update', player_id: ws.playerId, color });
+}
+
+function handleDeselectColor(ws) {
+  if (!ws.playerId || !ws.roomId) return;
+
+  const player = db.getPlayer(ws.playerId);
+  if (!player || !player.color) return;
+
+  db.deselectColor(ws.roomId, ws.playerId);
+  broadcastAll(ws.roomId, { type: 'color_update', player_id: ws.playerId, color: null });
 }
 
 function handleClickCell(ws, data) {
@@ -186,6 +215,16 @@ function handleClickCell(ws, data) {
       broadcastAll(ws.roomId, { type: 'cell_update', ...autoFill });
     }
   }
+}
+
+function handleResetBoard(ws) {
+  if (!ws.playerId || !ws.roomId) return;
+  if (!ws.isAdmin) {
+    return sendTo(ws, { type: 'error', code: 'not_admin', message: '你沒有管理員權限' });
+  }
+
+  db.resetBoard(ws.roomId);
+  broadcastAll(ws.roomId, { type: 'board_reset', room_id: ws.roomId });
 }
 
 function handleClearMyCells(ws) {
@@ -237,11 +276,17 @@ wss.on('connection', (ws) => {
       case 'select_color':
         handleSelectColor(ws, msg);
         break;
+      case 'deselect_color':
+        handleDeselectColor(ws);
+        break;
       case 'click_cell':
         handleClickCell(ws, msg);
         break;
       case 'clear_my_cells':
         handleClearMyCells(ws);
+        break;
+      case 'reset_board':
+        handleResetBoard(ws);
         break;
     }
   });
@@ -263,7 +308,9 @@ setInterval(() => {
 
 db.initDb().then(() => {
   server.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running on http://${DOMAIN}:${PORT}`);
+    console.log('Admin URL (one-time use, token will be stripped from browser URL):');
+    console.log('  http://' + DOMAIN + ':' + PORT + '/?admin=' + ADMIN_TOKEN);
   });
 }).catch(e => {
   console.error('Failed to initialize database:', e);

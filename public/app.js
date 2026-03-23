@@ -5,6 +5,8 @@ let myColor = null;
 let sessionToken = null;
 let roomId = null;
 let reconnectAttempt = 0;
+let isAdmin = false;
+let adminToken = sessionStorage.getItem('admin_token');
 
 // --- DOM ---
 const roomIdDisplay = document.getElementById('room-id-display');
@@ -15,6 +17,7 @@ const btnClear = document.getElementById('btn-clear');
 const connStatus = document.getElementById('connection-status');
 const colorBtns = document.querySelectorAll('.color-btn');
 const mySequenceEl = document.getElementById('my-sequence');
+const btnResetBoard = document.getElementById('btn-reset-board');
 
 // Track board cell ownership: boardCells[row] = { color, player_id } per col
 // key: "row,col" -> { color, player_id }
@@ -78,7 +81,11 @@ function setupEventListeners() {
     btn.addEventListener('click', () => {
       const color = btn.dataset.color;
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'select_color', color }));
+        if (color === myColor) {
+          ws.send(JSON.stringify({ type: 'deselect_color' }));
+        } else {
+          ws.send(JSON.stringify({ type: 'select_color', color }));
+        }
       }
     });
   });
@@ -101,13 +108,37 @@ function setupEventListeners() {
     }
   });
 
+  // Admin reset board
+  btnResetBoard.addEventListener('click', () => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'reset_board' }));
+    }
+  });
+
   // Copy link
   btnCopy.addEventListener('click', () => {
-    const url = window.location.href;
-    navigator.clipboard.writeText(url).then(() => {
+    // Build a clean URL without admin token
+    var copyParams = new URLSearchParams(window.location.search);
+    copyParams.delete('admin');
+    var url = window.location.origin + window.location.pathname + '?' + copyParams.toString();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(function() {
+        btnCopy.textContent = '✓ 已複製';
+        setTimeout(function() { btnCopy.textContent = '📋 複製連結'; }, 1500);
+      });
+    } else {
+      // Fallback for non-secure contexts (HTTP)
+      var ta = document.createElement('textarea');
+      ta.value = url;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
       btnCopy.textContent = '✓ 已複製';
-      setTimeout(() => { btnCopy.textContent = '📋 複製連結'; }, 1500);
-    });
+      setTimeout(function() { btnCopy.textContent = '📋 複製連結'; }, 1500);
+    }
   });
 }
 
@@ -120,11 +151,13 @@ function connect() {
   ws.addEventListener('open', () => {
     connStatus.hidden = true;
     reconnectAttempt = 0;
-    ws.send(JSON.stringify({
+    var joinMsg = {
       type: 'join_room',
       room_id: roomId,
       session_token: sessionToken,
-    }));
+    };
+    if (adminToken) joinMsg.admin_token = adminToken;
+    ws.send(JSON.stringify(joinMsg));
   });
 
   ws.addEventListener('message', (e) => {
@@ -160,6 +193,9 @@ function handleMessage(msg) {
     case 'board_clear_update':
       handleBoardClear(msg);
       break;
+    case 'board_reset':
+      handleBoardReset();
+      break;
     case 'player_joined':
       handlePlayerJoined(msg);
       break;
@@ -179,6 +215,9 @@ function handleRoomState(msg) {
   myPlayerId = msg.player_id;
   sessionToken = msg.session_token;
   sessionStorage.setItem('session_' + roomId, sessionToken);
+
+  isAdmin = !!msg.is_admin;
+  btnResetBoard.style.display = isAdmin ? '' : 'none';
 
   players = msg.players;
 
@@ -235,6 +274,12 @@ function handleBoardClear(msg) {
     setCellColor(row, col, null);
     delete boardCells[row + ',' + col];
   }
+  renderMySequence();
+}
+
+function handleBoardReset() {
+  boardCells = {};
+  clearBoardColors();
   renderMySequence();
 }
 

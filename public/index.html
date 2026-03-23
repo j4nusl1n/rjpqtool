@@ -25,6 +25,21 @@
     const btnJoin = document.getElementById('btn-join');
     const inputRoomId = document.getElementById('input-room-id');
     const entryError = document.getElementById('entry-error');
+    // Persist admin token in sessionStorage and strip from URL
+    (function() {
+      var params = new URLSearchParams(window.location.search);
+      var token = params.get('admin');
+      if (token) {
+        sessionStorage.setItem('admin_token', token);
+        params.delete('admin');
+        var clean = params.toString();
+        window.history.replaceState({}, '', window.location.pathname + (clean ? '?' + clean : ''));
+      }
+    })();
+
+    function roomUrl(roomId) {
+      return '/room.html?id=' + roomId;
+    }
 
     function showError(msg) {
       entryError.textContent = msg;
@@ -36,7 +51,7 @@
       try {
         const res = await fetch('/api/rooms', { method: 'POST' });
         const data = await res.json();
-        window.location.href = '/room.html?id=' + data.room_id;
+        window.location.href = roomUrl(data.room_id);
       } catch {
         showError('無法建立房間，請稍後再試');
         btnCreate.disabled = false;
@@ -67,7 +82,7 @@
           btnJoin.disabled = false;
           return;
         }
-        window.location.href = '/room.html?id=' + roomId;
+        window.location.href = roomUrl(roomId);
       } catch {
         showError('無法連線，請稍後再試');
         btnJoin.disabled = false;

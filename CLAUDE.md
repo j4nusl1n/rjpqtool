@@ -29,6 +29,7 @@ npm start        # Start server (default port 3001, override with PORT env)
 - `createRoom(roomId)` — creates room + inserts 40 board cells (10 rows × 4 cols)
 - `joinRoom(roomId, playerId, sessionToken)` — atomic count-then-insert (prevents >4 players)
 - `selectColor(roomId, playerId, color)` — atomic check-then-update (prevents duplicate colors, supports color switching)
+- `deselectColor(roomId, playerId)` — sets player's color to null (toggle deselection)
 - `clickCell(roomId, row, col, playerId, color)` — reads cell first: empty→fill, own color→clear, other's→ignore. Enforces one-color-per-row constraint. Auto-fills the 4th cell when 3 of 4 cells in a row have different colors
 - `clearMyCells(roomId, playerId, color)` — clears cells by color (not player_id), so orphaned cells from expired sessions can still be cleared
 - `cleanupStaleRooms(minutes)` — batched cleanup of inactive rooms
@@ -48,9 +49,9 @@ Board rows (40 cells: 10 rows × 4 clickable cols) are pre-inserted when a room 
 
 ### WebSocket Protocol
 
-Client → Server: `join_room` (with optional `session_token` for reconnect), `select_color`, `click_cell`, `clear_my_cells`
+Client → Server: `join_room` (with optional `session_token` for reconnect, optional `admin_token`), `select_color`, `deselect_color`, `click_cell`, `clear_my_cells`, `reset_board` (admin only)
 
-Server → Client: `room_state` (full state + `player_id` + `session_token`), `color_update`, `cell_update`, `board_clear_update`, `player_joined`, `player_left`, `error` (generic: `color_taken`, `room_full`, `color_in_row`, etc.)
+Server → Client: `room_state` (full state + `player_id` + `session_token` + `is_admin`), `color_update`, `cell_update`, `board_clear_update`, `board_reset`, `player_joined`, `player_left`, `error` (generic: `color_taken`, `room_full`, `color_in_row`, `not_admin`, etc.)
 
 ### Key Design Decisions
 
@@ -61,5 +62,7 @@ Server → Client: `room_state` (full state + `player_id` + `session_token`), `c
 - **Color-based ownership:** Cell clearing (click-to-toggle and clear button) matches by color, not `player_id`. This allows players to clear orphaned cells from expired sessions when they reselect the same color.
 - **Identity binding:** `player_id` is server-generated and bound to the WebSocket connection object (`ws.playerId`). Client-supplied IDs in messages are ignored.
 - **Disconnect grace period:** 30-second grace period before releasing color and broadcasting `player_left`. Reconnect with `session_token` to resume. Board marks are always preserved.
-- **Room links:** Format is `/room.html?id=123456` (6-digit numeric code).
+- **Admin token:** Generated at startup, printed to console. Passed once via `/?admin=TOKEN`, stored in `sessionStorage`, and immediately stripped from the URL. Verified server-side with `crypto.timingSafeEqual()`. Grants access to board reset.
+- **Color toggle:** Clicking an already-selected color deselects it (sets color to null), freeing it for other players.
+- **Room links:** Format is `/room.html?id=123456` (6-digit numeric code). Copy-link button strips admin token from the URL.
 - **Sequence display:** Shows the current player's selected column per row as a string (e.g., `142?4 ?3???`), with `?` for unselected rows and a space separator after row 5.
