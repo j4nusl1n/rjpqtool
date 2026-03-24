@@ -308,7 +308,7 @@ setInterval(() => {
 
 db.initDb().then(() => {
   server.listen(PORT, () => {
-    console.log(`Server running on http://${DOMAIN}:${PORT}`);
+    console.log(`rjpqtool v1.2.0 - Server running on http://${DOMAIN}:${PORT}`);
     console.log('Admin URL (one-time use, token will be stripped from browser URL):');
     console.log('  http://' + DOMAIN + ':' + PORT + '/?admin=' + ADMIN_TOKEN);
   });

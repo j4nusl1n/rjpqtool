@@ -44,6 +44,25 @@
     <div id="connection-status" class="connection-status" hidden>連線中斷，嘗試重新連線...</div>
   </div>
 
+  <!-- Tutorial Modal -->
+  <div id="tutorial-modal" class="modal-overlay" style="display:none">
+    <div class="modal-box">
+      <h3 class="modal-title">遊戲說明</h3>
+      <ul class="tutorial-list">
+        <li>選擇一個顏色（101 / 102 / 103 / 104）作為你的標記。</li>
+        <li>點擊棋盤格子來標記你的顏色。</li>
+        <li>點擊<strong>已標記的自己格子兩次</strong>可以取消標記（第一次會亮起提示）。</li>
+        <li>每列每種顏色只能出現一次。</li>
+        <li>當一列已有 3 種不同顏色時，第 4 格會自動填入剩餘顏色。</li>
+        <li>「清除我的顏色」按鈕可一次清除所有自己的格子。</li>
+      </ul>
+      <label class="tutorial-skip-label">
+        <input type="checkbox" id="tutorial-skip-cb"> 下次不再顯示
+      </label>
+      <button class="btn btn-primary" onclick="closeTutorial()">知道了</button>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

@@ -66,3 +66,5 @@ Server → Client: `room_state` (full state + `player_id` + `session_token` + `i
 - **Color toggle:** Clicking an already-selected color deselects it (sets color to null), freeing it for other players.
 - **Room links:** Format is `/room.html?id=123456` (6-digit numeric code). Copy-link button strips admin token from the URL.
 - **Sequence display:** Shows the current player's selected column per row as a string (e.g., `142?4 ?3???`), with `?` for unselected rows and a space separator after row 5.
+- **Double-click to deselect cell:** Clicking your own colored cell once arms a pending-deselect state (white inset border highlight, 1-second timeout). A second click on the same cell within 1 second sends `click_cell` to clear it. Clicking elsewhere cancels the pending state. Managed entirely client-side in `app.js` (`pendingDeselect`, `clearPendingDeselect()`).
+- **Tutorial modal:** Shown on first room entry (every visit by default). A "下次不再顯示" checkbox persists the skip preference to `localStorage` (`skip_tutorial=1`). `closeTutorial()` in `app.js`, modal HTML in `room.html`.

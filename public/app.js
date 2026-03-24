@@ -28,6 +28,10 @@ let pipStream = null;
 // key: "row,col" -> { color, player_id }
 let boardCells = {};
 
+// Pending deselect state (double-click to deselect own cell)
+let pendingDeselect = null;
+let pendingDeselectTimer = null;
+
 // --- Init ---
 (function init() {
   const params = new URLSearchParams(window.location.search);
@@ -46,6 +50,7 @@ let boardCells = {};
   buildBoard();
   setupEventListeners();
   connect();
+  showTutorialIfNeeded();
 })();
 
 function buildBoard() {
@@ -101,8 +106,30 @@ function setupEventListeners() {
     if (!td) return;
     const row = parseInt(td.dataset.row);
     const col = parseInt(td.dataset.col);
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'click_cell', row, col }));
+    const cellKey = row + ',' + col;
+    const cell = boardCells[cellKey];
+    const isMyCell = myColor && cell && cell.color === myColor;
+
+    if (isMyCell) {
+      if (pendingDeselect && pendingDeselect.row === row && pendingDeselect.col === col) {
+        // Second click on same cell — confirm deselect
+        clearPendingDeselect();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'click_cell', row, col }));
+        }
+      } else {
+        // First click on own cell — arm pending deselect
+        clearPendingDeselect();
+        pendingDeselect = { row, col };
+        td.classList.add('pending-deselect');
+        pendingDeselectTimer = setTimeout(clearPendingDeselect, 1000);
+      }
+    } else {
+      // Empty or other player's cell — clear pending and send normally
+      clearPendingDeselect();
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'click_cell', row, col }));
+      }
     }
   });
 
@@ -266,6 +293,9 @@ function handleColorUpdate(msg) {
 }
 
 function handleCellUpdate(msg) {
+  if (pendingDeselect && pendingDeselect.row === msg.row && pendingDeselect.col === msg.col) {
+    clearPendingDeselect();
+  }
   setCellColor(msg.row, msg.col, msg.color);
   if (msg.color) {
     boardCells[msg.row + ',' + msg.col] = { color: msg.color };
@@ -394,6 +424,34 @@ function clearBoardColors() {
 function getColorHex(color) {
   const map = { red: '#e74c3c', blue: '#3498db', green: '#2ecc71', yellow: '#f1c40f' };
   return map[color] || '#555';
+}
+
+// --- Pending deselect helpers ---
+
+function clearPendingDeselect() {
+  if (pendingDeselect) {
+    const td = boardBody.querySelector('td[data-row="' + pendingDeselect.row + '"][data-col="' + pendingDeselect.col + '"]');
+    if (td) td.classList.remove('pending-deselect');
+    pendingDeselect = null;
+  }
+  if (pendingDeselectTimer) {
+    clearTimeout(pendingDeselectTimer);
+    pendingDeselectTimer = null;
+  }
+}
+
+// --- Tutorial ---
+
+function showTutorialIfNeeded() {
+  if (localStorage.getItem('skip_tutorial') === '1') return;
+  document.getElementById('tutorial-modal').style.display = 'flex';
+}
+
+function closeTutorial() {
+  document.getElementById('tutorial-modal').style.display = 'none';
+  if (document.getElementById('tutorial-skip-cb').checked) {
+    localStorage.setItem('skip_tutorial', '1');
+  }
 }
 
 // --- Picture-in-Picture ---
