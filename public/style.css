@@ -220,6 +220,22 @@ body {
   border: 1px solid #5c7cfa;
 }
 
+.btn-kick {
+  background: none;
+  border: none;
+  color: #e74c3c;
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 0 2px;
+  margin-left: 2px;
+  line-height: 1;
+  opacity: 0.7;
+}
+
+.btn-kick:hover {
+  opacity: 1;
+}
+
 /* Board */
 .board-wrapper {
   overflow-x: auto;
@@ -242,6 +258,8 @@ body {
   vertical-align: middle;
   font-size: 1rem;
   transition: background-color 0.15s;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .board td.label-cell {
@@ -255,6 +273,7 @@ body {
 .board td.clickable {
   background: #16213e;
   cursor: pointer;
+  position: relative;
 }
 
 .board td.clickable:hover {
@@ -262,6 +281,23 @@ body {
 }
 
 /* Cell colors are applied via inline style.backgroundColor in app.js */
+
+/* Wrong marker overlays */
+.wrong-mark {
+  position: absolute;
+  font-size: 1rem;
+  font-weight: bold;
+  line-height: 1;
+  pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  opacity: 0.9;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.wrong-mark.pos-tl { top: 1px; left: 2px; }
+.wrong-mark.pos-tr { top: 1px; right: 2px; }
+.wrong-mark.pos-bl { bottom: 1px; left: 2px; }
+.wrong-mark.pos-br { bottom: 1px; right: 2px; }
 
 /* Clear button */
 .btn-clear {
@@ -289,6 +325,20 @@ body {
   color: #fff;
   text-align: center;
   font-size: 0.9rem;
+}
+
+/* Error banner */
+.error-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 10px;
+  background: #c0392b;
+  color: #fff;
+  text-align: center;
+  font-size: 0.9rem;
+  z-index: 200;
 }
 
 /* Pending deselect cell highlight */

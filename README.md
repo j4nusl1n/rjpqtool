@@ -8,6 +8,7 @@ A real-time multiplayer grid room tool. Up to 4 players join a shared room, pick
 - **Color selection** — 4 colors (red/blue/green/yellow), mutually exclusive per room
 - **10×4 grid board** — Click to fill with your color; click your own cell twice to clear it (first click highlights it, second click within 1 second confirms)
 - **One color per row** — Each color can only appear once per row; the 4th cell auto-fills when 3 are placed
+- **Wrong marker** — Right-click (desktop) or long-press (mobile) an empty cell to mark it with a colored ✕ indicating "not my color", helping other players eliminate possibilities; multiple players can mark the same cell; markers auto-clear when the cell is filled
 - **Sequence display** — Shows your selected columns as a string (e.g., `142?4 ?3???`)
 - **Clear button** — Remove all your color's cells at once
 - **Picture-in-Picture** — Float the board in a PiP overlay while switching tabs (Chrome/Edge/Safari 13.1+)
@@ -41,7 +42,8 @@ PORT=8080 DOMAIN=example.com npm start
 3. Select a color
 4. Click cells on the board to mark them with your color
 5. To clear a cell, click it once (highlights) then click again within 1 second to confirm
-6. Your sequence string updates live as you fill rows
+6. Right-click (desktop) or long-press (mobile) an empty cell to mark it as "not my color" — all players will see the marker
+7. Your sequence string updates live as you fill rows
 
 ## Tech Stack
 

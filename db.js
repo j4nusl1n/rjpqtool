@@ -39,6 +39,7 @@ async function initDb() {
 
   db.run('CREATE INDEX IF NOT EXISTS idx_players_room ON players(room_id)');
   db.run('CREATE INDEX IF NOT EXISTS idx_players_session ON players(session_token)');
+  db.run('CREATE INDEX IF NOT EXISTS idx_rooms_activity ON rooms(last_activity)');
 
   db.run(`
     CREATE TABLE IF NOT EXISTS board_state (
@@ -48,6 +49,16 @@ async function initDb() {
       color     TEXT,
       player_id TEXT REFERENCES players(player_id),
       PRIMARY KEY (room_id, row, col)
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS wrong_markers (
+      room_id      TEXT,
+      row          INTEGER,
+      col          INTEGER,
+      marker_color TEXT,
+      PRIMARY KEY (room_id, row, col, marker_color)
     )
   `);
 
@@ -186,6 +197,39 @@ function deselectColor(roomId, playerId) {
   markDirty();
 }
 
+function toggleWrongMarker(roomId, row, col, markerColor) {
+  db.run('BEGIN');
+  try {
+    var cell = getOne('SELECT color FROM board_state WHERE room_id = ? AND row = ? AND col = ?', [roomId, row, col]);
+    if (!cell || cell.color) {
+      // Can only mark empty cells
+      db.run('ROLLBACK');
+      return null;
+    }
+    var existing = getOne('SELECT 1 as x FROM wrong_markers WHERE room_id = ? AND row = ? AND col = ? AND marker_color = ?', [roomId, row, col, markerColor]);
+    if (existing) {
+      run('DELETE FROM wrong_markers WHERE room_id = ? AND row = ? AND col = ? AND marker_color = ?', [roomId, row, col, markerColor]);
+      run("UPDATE rooms SET last_activity = datetime('now') WHERE room_id = ?", [roomId]);
+      db.run('COMMIT');
+      markDirty();
+      return { row: row, col: col, marker_color: markerColor, wrong: 0 };
+    } else {
+      run('INSERT INTO wrong_markers (room_id, row, col, marker_color) VALUES (?, ?, ?, ?)', [roomId, row, col, markerColor]);
+      run("UPDATE rooms SET last_activity = datetime('now') WHERE room_id = ?", [roomId]);
+      db.run('COMMIT');
+      markDirty();
+      return { row: row, col: col, marker_color: markerColor, wrong: 1 };
+    }
+  } catch (e) {
+    db.run('ROLLBACK');
+    throw e;
+  }
+}
+
+function getWrongMarkers(roomId) {
+  return getAll('SELECT row, col, marker_color FROM wrong_markers WHERE room_id = ?', [roomId]);
+}
+
 function clickCell(roomId, row, col, playerId, color) {
   db.run('BEGIN');
   try {
@@ -204,6 +248,8 @@ function clickCell(roomId, row, col, playerId, color) {
         db.run('ROLLBACK');
         return { error: 'color_in_row' };
       }
+      // Clear wrong markers on this cell (it's being filled)
+      run('DELETE FROM wrong_markers WHERE room_id = ? AND row = ? AND col = ?', [roomId, row, col]);
       run('UPDATE board_state SET color = ?, player_id = ? WHERE room_id = ? AND row = ? AND col = ?', [color, playerId, roomId, row, col]);
 
       // Auto-fill: if 3 of 4 cells in this row now have colors, fill the last one
@@ -231,6 +277,7 @@ function clickCell(roomId, row, col, playerId, color) {
           // Find the player who owns this color (if any)
           var owner = getOne('SELECT player_id FROM players WHERE room_id = ? AND color = ?', [roomId, missingColor]);
           var ownerId = owner ? owner.player_id : null;
+          run('DELETE FROM wrong_markers WHERE room_id = ? AND row = ? AND col = ?', [roomId, row, emptyCol]);
           run('UPDATE board_state SET color = ?, player_id = ? WHERE room_id = ? AND row = ? AND col = ?', [missingColor, ownerId, roomId, row, emptyCol]);
           autoFill = { row: row, col: emptyCol, color: missingColor, player_id: ownerId };
         }
@@ -275,6 +322,7 @@ function resetBoard(roomId) {
   db.run('BEGIN');
   try {
     run('UPDATE board_state SET color = NULL, player_id = NULL WHERE room_id = ?', [roomId]);
+    run('DELETE FROM wrong_markers WHERE room_id = ?', [roomId]);
     run("UPDATE rooms SET last_activity = datetime('now') WHERE room_id = ?", [roomId]);
     db.run('COMMIT');
     markDirty();
@@ -289,6 +337,7 @@ function cleanupStaleRooms(minutes) {
   try {
     const stale = getAll("SELECT room_id FROM rooms WHERE last_activity < datetime('now', ? || ' minutes') LIMIT 10", ['-' + minutes]);
     for (const { room_id } of stale) {
+      run('DELETE FROM wrong_markers WHERE room_id = ?', [room_id]);
       run('DELETE FROM board_state WHERE room_id = ?', [room_id]);
       run('DELETE FROM players WHERE room_id = ?', [room_id]);
       run('DELETE FROM rooms WHERE room_id = ?', [room_id]);
@@ -322,6 +371,31 @@ function removePlayer(playerId) {
   markDirty();
 }
 
+function kickPlayer(roomId, playerId) {
+  db.run('BEGIN');
+  try {
+    var player = getOne('SELECT color FROM players WHERE player_id = ? AND room_id = ?', [playerId, roomId]);
+    if (!player) {
+      db.run('ROLLBACK');
+      return { success: false, reason: 'player_not_found' };
+    }
+    var clearedCells = [];
+    if (player.color) {
+      clearedCells = getAll('SELECT row, col FROM board_state WHERE room_id = ? AND color = ?', [roomId, player.color]);
+      run('UPDATE board_state SET color = NULL, player_id = NULL WHERE room_id = ? AND color = ?', [roomId, player.color]);
+      run('DELETE FROM wrong_markers WHERE room_id = ? AND marker_color = ?', [roomId, player.color]);
+    }
+    run('DELETE FROM players WHERE player_id = ?', [playerId]);
+    run("UPDATE rooms SET last_activity = datetime('now') WHERE room_id = ?", [roomId]);
+    db.run('COMMIT');
+    markDirty();
+    return { success: true, color: player.color, cleared_cells: clearedCells };
+  } catch (e) {
+    db.run('ROLLBACK');
+    throw e;
+  }
+}
+
 function generateRoomId() {
   for (let i = 0; i < 100; i++) {
     const id = String(Math.floor(100000 + Math.random() * 900000));
@@ -340,11 +414,14 @@ module.exports = {
   clickCell,
   clearMyCells,
   resetBoard,
+  toggleWrongMarker,
+  getWrongMarkers,
   cleanupStaleRooms,
   getRoomState,
   roomExists,
   getPlayer,
   removePlayer,
+  kickPlayer,
   generateRoomId,
   close: () => { save(); db.close(); },
 };

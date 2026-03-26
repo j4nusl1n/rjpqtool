@@ -1,6 +1,6 @@
 {
   "name": "rjpqtool",
-  "version": "1.0.0",
+  "version": "1.3.0",
   "description": "多人互動方塊房間工具 - Real-time multiplayer grid room tool",
   "main": "server.js",
   "scripts": {

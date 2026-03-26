@@ -132,6 +132,7 @@ function handleJoinRoom(ws, data) {
       return sendTo(ws, {
         type: 'room_state',
         ...state,
+        wrong_markers: db.getWrongMarkers(room_id),
         player_id: player.player_id,
         session_token,
         is_admin: ws.isAdmin,
@@ -159,6 +160,7 @@ function handleJoinRoom(ws, data) {
   sendTo(ws, {
     type: 'room_state',
     ...state,
+    wrong_markers: db.getWrongMarkers(room_id),
     player_id: playerId,
     session_token: newSessionToken,
     is_admin: ws.isAdmin,
@@ -210,10 +212,30 @@ function handleClickCell(ws, data) {
   if (result) {
     const autoFill = result.auto_fill;
     delete result.auto_fill;
-    broadcastAll(ws.roomId, { type: 'cell_update', ...result });
     if (autoFill) {
-      broadcastAll(ws.roomId, { type: 'cell_update', ...autoFill });
+      broadcastAll(ws.roomId, { type: 'cells_update', cells: [result, autoFill] });
+    } else {
+      broadcastAll(ws.roomId, { type: 'cell_update', ...result });
     }
+  }
+}
+
+function handleToggleWrong(ws, data) {
+  if (!ws.playerId || !ws.roomId) return;
+
+  var player = db.getPlayer(ws.playerId);
+  if (!player || !player.color) {
+    return sendTo(ws, { type: 'error', code: 'not_colored', message: '請先選擇顏色' });
+  }
+
+  var row = data.row;
+  var col = data.col;
+  if (typeof row !== 'number' || typeof col !== 'number') return;
+  if (row < 1 || row > 10 || col < 2 || col > 5) return;
+
+  var result = db.toggleWrongMarker(ws.roomId, row, col, player.color);
+  if (result) {
+    broadcastAll(ws.roomId, { type: 'wrong_update', row: result.row, col: result.col, marker_color: result.marker_color, wrong: result.wrong });
   }
 }
 
@@ -240,6 +262,51 @@ function handleClearMyCells(ws) {
       cleared_cells: clearedCells.map(c => [c.row, c.col]),
     });
   }
+}
+
+function handleKickPlayer(ws, data) {
+  if (!ws.playerId || !ws.roomId) return;
+  if (!ws.isAdmin) {
+    return sendTo(ws, { type: 'error', code: 'not_admin', message: '你沒有管理員權限' });
+  }
+
+  var targetId = data.target_player_id;
+  if (!targetId || targetId === ws.playerId) return;
+
+  var result = db.kickPlayer(ws.roomId, targetId);
+  if (!result.success) return;
+
+  // Cancel any disconnect timer for the kicked player
+  var timer = disconnectTimers.get(targetId);
+  if (timer) {
+    clearTimeout(timer.timeout);
+    disconnectTimers.delete(targetId);
+  }
+
+  // Find and close the kicked player's WebSocket
+  var conns = roomConnections.get(ws.roomId);
+  if (conns) {
+    for (var conn of conns) {
+      if (conn.playerId === targetId) {
+        sendTo(conn, { type: 'kicked', message: '你已被管理員踢出房間' });
+        removeFromRoom(ws.roomId, conn);
+        conn.playerId = null;
+        conn.roomId = null;
+        conn.sessionToken = null;
+        conn.close();
+        break;
+      }
+    }
+  }
+
+  // Broadcast player removal and cell clearing
+  if (result.cleared_cells.length > 0) {
+    broadcastAll(ws.roomId, {
+      type: 'board_clear_update',
+      cleared_cells: result.cleared_cells.map(function(c) { return [c.row, c.col]; }),
+    });
+  }
+  broadcastAll(ws.roomId, { type: 'player_left', player_id: targetId });
 }
 
 function handleDisconnect(ws) {
@@ -285,8 +352,14 @@ wss.on('connection', (ws) => {
       case 'clear_my_cells':
         handleClearMyCells(ws);
         break;
+      case 'toggle_wrong':
+        handleToggleWrong(ws, msg);
+        break;
       case 'reset_board':
         handleResetBoard(ws);
+        break;
+      case 'kick_player':
+        handleKickPlayer(ws, msg);
         break;
     }
   });
@@ -308,7 +381,7 @@ setInterval(() => {
 
 db.initDb().then(() => {
   server.listen(PORT, () => {
-    console.log(`rjpqtool v1.2.0 - Server running on http://${DOMAIN}:${PORT}`);
+    console.log(`rjpqtool v1.3.0 - Server running on http://${DOMAIN}:${PORT}`);
     console.log('Admin URL (one-time use, token will be stripped from browser URL):');
     console.log('  http://' + DOMAIN + ':' + PORT + '/?admin=' + ADMIN_TOKEN);
   });

@@ -8,6 +8,9 @@ let reconnectAttempt = 0;
 let isAdmin = false;
 let adminToken = sessionStorage.getItem('admin_token');
 
+// --- Helpers ---
+function sessionKey() { return 'session_' + roomId; }
+
 // --- DOM ---
 const roomIdDisplay = document.getElementById('room-id-display');
 const btnCopy = document.getElementById('btn-copy');
@@ -15,6 +18,7 @@ const playerList = document.getElementById('player-list');
 const boardBody = document.getElementById('board-body');
 const btnClear = document.getElementById('btn-clear');
 const connStatus = document.getElementById('connection-status');
+const errorBanner = document.getElementById('error-banner');
 const colorBtns = document.querySelectorAll('.color-btn');
 const mySequenceEl = document.getElementById('my-sequence');
 const btnResetBoard = document.getElementById('btn-reset-board');
@@ -32,6 +36,14 @@ let boardCells = {};
 let pendingDeselect = null;
 let pendingDeselectTimer = null;
 
+// Wrong markers: "row,col" -> Set of marker colors
+let wrongMarkers = {};
+
+// Long-press state for mobile wrong marker
+let longPressTimer = null;
+let longPressTarget = null;
+let longPressFired = false;
+
 // --- Init ---
 (function init() {
   const params = new URLSearchParams(window.location.search);
@@ -45,7 +57,7 @@ let pendingDeselectTimer = null;
   document.title = '房間 ' + roomId;
 
   // Restore session token from sessionStorage
-  sessionToken = sessionStorage.getItem('session_' + roomId);
+  sessionToken = sessionStorage.getItem(sessionKey());
 
   buildBoard();
   setupEventListeners();
@@ -131,6 +143,65 @@ function setupEventListeners() {
         ws.send(JSON.stringify({ type: 'click_cell', row, col }));
       }
     }
+  });
+
+  // Wrong marker — desktop right-click
+  boardBody.addEventListener('contextmenu', function(e) {
+    var td = e.target.closest('td.clickable');
+    if (!td) return;
+    e.preventDefault();
+    var row = parseInt(td.dataset.row);
+    var col = parseInt(td.dataset.col);
+    var cellKey = row + ',' + col;
+    var cell = boardCells[cellKey];
+    // Only mark empty cells, must have color selected
+    if (!cell || !cell.color) {
+      if (myColor && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'toggle_wrong', row: row, col: col }));
+      }
+    }
+  });
+
+  // Wrong marker — mobile long-press
+  boardBody.addEventListener('touchstart', function(e) {
+    var td = e.target.closest('td.clickable');
+    if (!td) return;
+    longPressFired = false;
+    longPressTarget = { row: parseInt(td.dataset.row), col: parseInt(td.dataset.col) };
+    longPressTimer = setTimeout(function() {
+      if (!longPressTarget) return;
+      var cellKey = longPressTarget.row + ',' + longPressTarget.col;
+      var cell = boardCells[cellKey];
+      if (!cell || !cell.color) {
+        if (myColor && ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'toggle_wrong', row: longPressTarget.row, col: longPressTarget.col }));
+        }
+      }
+      longPressFired = true;
+      longPressTarget = null;
+    }, 500);
+  }, { passive: true });
+
+  boardBody.addEventListener('touchend', function(e) {
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+    longPressTarget = null;
+    if (longPressFired) {
+      e.preventDefault();
+      longPressFired = false;
+    }
+  });
+
+  boardBody.addEventListener('touchmove', function() {
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+    longPressTarget = null;
+  });
+
+  boardBody.addEventListener('touchcancel', function() {
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+    longPressTarget = null;
   });
 
   // Clear button
@@ -222,17 +293,26 @@ function handleMessage(msg) {
     case 'cell_update':
       handleCellUpdate(msg);
       break;
+    case 'cells_update':
+      handleCellsUpdate(msg);
+      break;
     case 'board_clear_update':
       handleBoardClear(msg);
       break;
     case 'board_reset':
       handleBoardReset();
       break;
+    case 'wrong_update':
+      handleWrongUpdate(msg);
+      break;
     case 'player_joined':
       handlePlayerJoined(msg);
       break;
     case 'player_left':
       handlePlayerLeft(msg);
+      break;
+    case 'kicked':
+      handleKicked(msg);
       break;
     case 'error':
       handleError(msg);
@@ -246,7 +326,7 @@ let players = [];
 function handleRoomState(msg) {
   myPlayerId = msg.player_id;
   sessionToken = msg.session_token;
-  sessionStorage.setItem('session_' + roomId, sessionToken);
+  sessionStorage.setItem(sessionKey(), sessionToken);
 
   isAdmin = !!msg.is_admin;
   btnResetBoard.style.display = isAdmin ? '' : 'none';
@@ -263,11 +343,26 @@ function handleRoomState(msg) {
 
   // Render board
   boardCells = {};
+  wrongMarkers = {};
   clearBoardColors();
+  clearAllWrongMarkers();
   for (const cell of msg.board) {
     if (cell.color) {
       boardCells[cell.row + ',' + cell.col] = { color: cell.color };
       setCellColor(cell.row, cell.col, cell.color);
+    }
+  }
+  // Render wrong markers from server state
+  if (msg.wrong_markers) {
+    for (var i = 0; i < msg.wrong_markers.length; i++) {
+      var wm = msg.wrong_markers[i];
+      var wmKey = wm.row + ',' + wm.col;
+      if (!wrongMarkers[wmKey]) wrongMarkers[wmKey] = {};
+      wrongMarkers[wmKey][wm.marker_color] = true;
+    }
+    for (var key in wrongMarkers) {
+      var parts = key.split(',');
+      renderWrongMarkers(parseInt(parts[0]), parseInt(parts[1]));
     }
   }
   renderMySequence();
@@ -297,10 +392,37 @@ function handleCellUpdate(msg) {
     clearPendingDeselect();
   }
   setCellColor(msg.row, msg.col, msg.color);
+  var cellKey = msg.row + ',' + msg.col;
   if (msg.color) {
-    boardCells[msg.row + ',' + msg.col] = { color: msg.color };
+    boardCells[cellKey] = { color: msg.color };
+    // Cell got filled — clear wrong markers
+    if (wrongMarkers[cellKey]) {
+      delete wrongMarkers[cellKey];
+      renderWrongMarkers(msg.row, msg.col);
+    }
   } else {
-    delete boardCells[msg.row + ',' + msg.col];
+    delete boardCells[cellKey];
+  }
+  renderMySequence();
+  if (pipActive) drawBoardToCanvas();
+}
+
+function handleCellsUpdate(msg) {
+  for (const cell of msg.cells) {
+    if (pendingDeselect && pendingDeselect.row === cell.row && pendingDeselect.col === cell.col) {
+      clearPendingDeselect();
+    }
+    setCellColor(cell.row, cell.col, cell.color);
+    var cellKey = cell.row + ',' + cell.col;
+    if (cell.color) {
+      boardCells[cellKey] = { color: cell.color };
+      if (wrongMarkers[cellKey]) {
+        delete wrongMarkers[cellKey];
+        renderWrongMarkers(cell.row, cell.col);
+      }
+    } else {
+      delete boardCells[cellKey];
+    }
   }
   renderMySequence();
   if (pipActive) drawBoardToCanvas();
@@ -317,7 +439,9 @@ function handleBoardClear(msg) {
 
 function handleBoardReset() {
   boardCells = {};
+  wrongMarkers = {};
   clearBoardColors();
+  clearAllWrongMarkers();
   renderMySequence();
   if (pipActive) drawBoardToCanvas();
 }
@@ -336,13 +460,37 @@ function handlePlayerLeft(msg) {
   renderColorPicker();
 }
 
+function handleKicked(msg) {
+  // Clear session so reconnect won't rejoin
+  sessionStorage.removeItem(sessionKey());
+  sessionToken = null;
+  // Close WebSocket to prevent auto-reconnect
+  if (ws) {
+    ws.onclose = null;
+    ws.close();
+  }
+  showError(msg.message + '，即將返回首頁…', 2500);
+}
+
+let errorBannerTimer = null;
+
+function showError(text, redirectAfterMs) {
+  errorBanner.textContent = text;
+  errorBanner.hidden = false;
+  if (errorBannerTimer) clearTimeout(errorBannerTimer);
+  if (redirectAfterMs) {
+    errorBannerTimer = setTimeout(function() { window.location.href = '/'; }, redirectAfterMs);
+  } else {
+    errorBannerTimer = setTimeout(function() { errorBanner.hidden = true; }, 2500);
+  }
+}
+
 function handleError(msg) {
   if (msg.code === 'room_full' || msg.code === 'room_not_found') {
-    alert(msg.message);
-    window.location.href = '/';
+    showError(msg.message + '，即將返回首頁…', 2500);
     return;
   }
-  // Flash error for other types
+  showError(msg.message);
   console.warn('Server error:', msg.code, msg.message);
 }
 
@@ -362,6 +510,22 @@ function renderPlayers() {
     const label = document.createElement('span');
     label.textContent = p.player_id === myPlayerId ? '你' : '玩家';
     tag.appendChild(label);
+
+    if (isAdmin && p.player_id !== myPlayerId) {
+      var kickBtn = document.createElement('button');
+      kickBtn.className = 'btn-kick';
+      kickBtn.textContent = '✕';
+      kickBtn.title = '踢出玩家';
+      kickBtn.dataset.playerId = p.player_id;
+      kickBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        var targetId = this.dataset.playerId;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'kick_player', target_player_id: targetId }));
+        }
+      });
+      tag.appendChild(kickBtn);
+    }
 
     playerList.appendChild(tag);
   }
@@ -437,6 +601,60 @@ function clearPendingDeselect() {
   if (pendingDeselectTimer) {
     clearTimeout(pendingDeselectTimer);
     pendingDeselectTimer = null;
+  }
+}
+
+// --- Wrong markers ---
+
+function handleWrongUpdate(msg) {
+  var cellKey = msg.row + ',' + msg.col;
+  if (msg.wrong) {
+    if (!wrongMarkers[cellKey]) wrongMarkers[cellKey] = {};
+    wrongMarkers[cellKey][msg.marker_color] = true;
+  } else {
+    if (wrongMarkers[cellKey]) {
+      delete wrongMarkers[cellKey][msg.marker_color];
+      if (Object.keys(wrongMarkers[cellKey]).length === 0) {
+        delete wrongMarkers[cellKey];
+      }
+    }
+  }
+  renderWrongMarkers(msg.row, msg.col);
+  if (pipActive) drawBoardToCanvas();
+}
+
+var markerPositions = ['pos-tl', 'pos-tr', 'pos-bl', 'pos-br'];
+var markerColorOrder = ['red', 'blue', 'green', 'yellow'];
+
+function renderWrongMarkers(row, col) {
+  var td = boardBody.querySelector('td[data-row="' + row + '"][data-col="' + col + '"]');
+  if (!td) return;
+  // Remove existing markers
+  var existing = td.querySelectorAll('.wrong-mark');
+  for (var i = 0; i < existing.length; i++) {
+    existing[i].remove();
+  }
+  var cellKey = row + ',' + col;
+  var markers = wrongMarkers[cellKey];
+  if (!markers) return;
+  // Sort by color order for consistent positioning
+  var colors = [];
+  for (var j = 0; j < markerColorOrder.length; j++) {
+    if (markers[markerColorOrder[j]]) colors.push(markerColorOrder[j]);
+  }
+  for (var k = 0; k < colors.length && k < 4; k++) {
+    var span = document.createElement('span');
+    span.className = 'wrong-mark ' + markerPositions[k];
+    span.textContent = '✕';
+    span.style.color = getColorHex(colors[k]);
+    td.appendChild(span);
+  }
+}
+
+function clearAllWrongMarkers() {
+  var marks = boardBody.querySelectorAll('.wrong-mark');
+  for (var i = 0; i < marks.length; i++) {
+    marks[i].remove();
   }
 }
 
@@ -536,6 +754,30 @@ function drawBoardToCanvas() {
       var cell = boardCells[rowNum + ',' + col];
       ctx.fillStyle = (cell && cell.color) ? getColorHex(cell.color) : '#16213e';
       ctx.fillRect(cx + gap, y + gap, cellW - gap * 2, cellH - gap * 2);
+
+      // Draw wrong markers on empty cells
+      var wmKey = rowNum + ',' + col;
+      var wm = wrongMarkers[wmKey];
+      if (wm && (!cell || !cell.color)) {
+        var wmColors = [];
+        for (var mi = 0; mi < markerColorOrder.length; mi++) {
+          if (wm[markerColorOrder[mi]]) wmColors.push(markerColorOrder[mi]);
+        }
+        var wmSize = Math.floor(cellH * 0.25);
+        ctx.font = 'bold ' + wmSize + 'px sans-serif';
+        var wmPositions = [
+          [cx + gap + wmSize / 2 + 1, y + gap + wmSize / 2 + 1],
+          [cx + cellW - gap - wmSize / 2 - 1, y + gap + wmSize / 2 + 1],
+          [cx + gap + wmSize / 2 + 1, y + cellH - gap - wmSize / 2 - 1],
+          [cx + cellW - gap - wmSize / 2 - 1, y + cellH - gap - wmSize / 2 - 1]
+        ];
+        for (var wi = 0; wi < wmColors.length && wi < 4; wi++) {
+          ctx.fillStyle = getColorHex(wmColors[wi]);
+          ctx.fillText('✕', wmPositions[wi][0], wmPositions[wi][1]);
+        }
+        // Restore font for label rendering
+        ctx.font = 'bold ' + Math.floor(cellH * 0.45) + 'px sans-serif';
+      }
     }
   }
 
